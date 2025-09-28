@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+genkit
+genkit-plugin-google-genai
+supabase
+python-dotenv
