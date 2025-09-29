@@ -11,3 +11,7 @@ class ReportRequest(BaseModel):
 class ReportResponse(BaseModel):
     report: str
 
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+

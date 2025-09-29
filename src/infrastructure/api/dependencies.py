@@ -20,4 +20,3 @@ class JWTBearer(HTTPBearer):
         raise HTTPException(status_code=403, detail="Credenciales faltantes")
 
 jwt_scheme = JWTBearer()
-
