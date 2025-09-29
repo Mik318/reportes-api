@@ -6,7 +6,7 @@ from ....domain.models import AuthTokenResponse
 from ....application.services import AuthService
 
 
-router = APIRouter(prefix="/auth", tags=["Autenticación"])
+router = APIRouter(prefix="/auth", tags=["Autenticacion"])
 auth_service = AuthService()
 
 
