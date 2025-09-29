@@ -1,6 +1,20 @@
+# Core API
 fastapi
-uvicorn[standard]
+uvicorn[standard]  # Servidor ASGI para correr FastAPI
+
+# Data validation
+pydantic  # Modelos de datos y validación
+
+# AI / Genkit
 genkit
 genkit-plugin-google-genai
-supabase
-python-dotenv
+
+# Database / Backend
+supabase  # Cliente Python para Supabase
+
+# Environment variables
+python-dotenv  # Carga de variables desde .env
+
+# Code quality / static checks
+mypy       # Chequeo estático de tipos
+ruff       # Linter rápido y formateador

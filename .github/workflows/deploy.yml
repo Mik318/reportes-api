@@ -3,31 +3,35 @@ name: Deploy FastAPI to Render
 on:
   push:
     branches:
-      - master  # o la rama que uses para producción
+      - master  # Solo deploy en la rama master
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production  # Protege el deploy y usa los secrets del environment
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Deploy to Render
-      env:
-        RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-        RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-      run: |
-        curl -X POST "https://api.render.com/deploy/srv-${RENDER_SERVICE_ID}" \
-        -H "Authorization: Bearer ${RENDER_API_KEY}" \
-        -H "Accept: application/json"
+      - name: Deploy to Render
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          curl -X POST "https://api.render.com/deploy/srv-${RENDER_SERVICE_ID}" \
+          -H "Authorization: Bearer ${RENDER_API_KEY}" \
+          -H "Accept: application/json"
