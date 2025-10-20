@@ -14,6 +14,7 @@ class ReportService:
     async def create_report(self, report_request: ReportRequest) -> ReportResponse:
         return await generar_reporte(report_request)
 
+
 class AuthService:
     async def generate_authtoken(self, email: str, password: str) -> AuthTokenResponse:
         auth_repository = SupabaseAuthRepository()
