@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import List
 
 
 class Token(BaseModel):
@@ -26,15 +27,14 @@ class ReportRequest(BaseModel):
     """
     Solicitud para generar un reporte.
     """
-    prompt: str = Field(..., description="Texto para generar el reporte")
+    actividades: List[str] = Field(..., description="Lista de actividades realizadas")
 
 
 class ReportResponse(BaseModel):
     """
     Respuesta con el reporte generado.
     """
-    report: str = Field(..., description="Contenido del reporte generado")
-
+    report: str = Field(..., description="Reporte generado")
 
 class AuthTokenResponse(BaseModel):
     """

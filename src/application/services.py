@@ -1,8 +1,6 @@
-from os import access
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status
-from supabase_auth.errors import AuthApiError
+from fastapi import HTTPException, status
 
 from ..domain.errors import UserAlreadyExistsError
 from ..domain.models import ReportRequest, ReportResponse, AuthTokenResponse, User
@@ -19,7 +17,7 @@ class AuthService:
     async def generate_authtoken(self, email: str, password: str) -> AuthTokenResponse:
         auth_repository = SupabaseAuthRepository()
         access_token = auth_repository.sign_in_with_password(email, password)
-        return AuthTokenResponse(access_token=access_token)
+        return AuthTokenResponse(access_token=access_token, token_type="bearer")
 
     async def create_account(self, email: str, password: str) -> Optional[User]:
         try:

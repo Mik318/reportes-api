@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends
 
 from ...api.dependencies import jwt_scheme
 from ....application.services import ReportService
-from ....domain.models import ReportRequest, ReportResponse, User
+from ....domain.models import ReportResponse, User
+from ....genkit_flow import ReportRequest
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 report_service = ReportService()
