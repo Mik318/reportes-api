@@ -2,13 +2,16 @@ import os
 import logging
 import json
 import re
+import asyncio
+import time
+from typing import List, Optional
+
+from dotenv import load_dotenv
 from genkit.ai import Genkit
 from genkit.plugins.google_genai import GoogleAI
-from dotenv import load_dotenv
-from typing import List
 
-# Importar modelos desde domain
 from src.domain.models import ReportRequest, ReportResponse
+
 
 MAX_CHARS = 1245
 
@@ -156,7 +159,10 @@ async def _local_generate_report(actividades: List[str]) -> str:
 
 @ai.flow() if ai is not None else None
 async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
-    # Si no hay API key, usar generador local
+    # Timeout configurable para llamadas a la IA (segundos)
+    timeout = int(os.getenv("GENAI_TIMEOUT", "8"))
+
+    # Si no hay API key, usar generador local (igual que antes)
     if ai is None:
         report = await _local_generate_report(input_data.actividades)
         if not report:
@@ -164,25 +170,34 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
         return ReportResponse(report=report)
 
     prompt_lines = "\n".join(f"- {a}" for a in input_data.actividades)
+    # Solicitar \"máximo\" en lugar de \"exactamente\" para evitar trabajo extra del modelo
     prompt = (
         f"Genera un reporte formal y conciso basado en las siguientes actividades:\n"
         f"{prompt_lines}\n\n"
-        f"El reporte debe tener exactamente {MAX_CHARS} caracteres. "
+        f"El reporte debe tener como máximo {MAX_CHARS} caracteres. "
         f"Devuélvelo como texto plano en un campo llamado 'report', "
-        f"en primera persona y en pasado, sin numeración ni metadatos adicionales. "
-        f"IMPORTANTE: Asegúrate de que el texto esté completo y no se corte abruptamente."
+        f"en primera persona y en pasado, sin numeración ni metadatos adicionales."
     )
 
     report: str | None = None
+    start = time.perf_counter()
 
-    # Intento principal: pedir parsing a schema
+    # Intento principal: usar output_schema pero con timeout
     try:
-        result = await ai.generate(prompt=prompt, output_schema=ReportResponse)
-    except Exception as e:
-        logger.debug("Error al generar con output_schema: %s", e)
-        # Error al parsear/llamar con schema, intentamos un fallback sin schema
         try:
-            raw = await ai.generate(prompt=prompt)
+            result = await asyncio.wait_for(ai.generate(prompt=prompt, output_schema=ReportResponse), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("AI generate con output_schema excedió timeout de %s s, intentando fallback", timeout)
+            raise
+    except Exception as e:
+        # Si falla (incluyendo timeout), intentar fallback rápido sin schema con timeout
+        logger.debug("Error al generar con output_schema: %s", e)
+        try:
+            raw = await asyncio.wait_for(ai.generate(prompt=prompt), timeout=timeout)
+        except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - start
+            logger.error("Timeout generando reporte (fallback) después de %.2fs", elapsed)
+            raise ValueError("Timeout generando el reporte") from None
         except Exception as e2:
             logger.error("Error al llamar al proveedor AI (fallback): %s", e2)
             raise ValueError("Error al generar el reporte") from e2
@@ -193,22 +208,21 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
         elif hasattr(raw, 'text') and isinstance(raw.text, str):
             report = raw.text.strip()
         else:
-            # último recurso: string del objeto
             report = str(raw).strip()
     else:
         # Si no hubo excepción, intentar extraer del resultado parseado
         if getattr(result, 'output', None) and getattr(result.output, 'report', None):
             report = result.output.report.strip()
         else:
-            # intentar con propiedades crudas si el schema no produjo output
             if getattr(result, 'response', None) and isinstance(result.response, str):
                 report = result.response.strip()
             else:
-                # fallback a str(result)
                 report = str(result).strip()
 
+    elapsed_total = time.perf_counter() - start
+    logger.debug("Tiempo total generar_reporte: %.2fs", elapsed_total)
+
     if not report:
-        # Loggear el resultado completo para depuración antes de fallar
         try:
             logger.error("Generación AI falló, result raw: %s", str(result if 'result' in locals() else raw if 'raw' in locals() else None))
         except Exception:
@@ -218,19 +232,14 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
     # Extraer solo el texto importante del campo 'report'
     report = extract_report_text(report)
 
-    # Truncado más inteligente: solo si supera significativamente el límite
+    # Truncado más inteligente como antes
     if len(report) <= MAX_CHARS:
         return ReportResponse(report=report)
 
-    # Si supera el límite, truncar pero intentar cerrar la oración
     truncated = report[:MAX_CHARS]
-
-    # Buscar el último punto, punto y coma, o coma para terminar de forma natural
     last_period = truncated.rfind('.')
     last_semicolon = truncated.rfind(';')
     last_comma = truncated.rfind(',')
-
-    # Usar el último punto si está cerca del final (dentro del último 10% del texto)
     min_acceptable_length = int(MAX_CHARS * 0.9)
 
     if last_period > min_acceptable_length:
@@ -240,7 +249,6 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
     elif last_comma > min_acceptable_length:
         truncated = truncated[:last_comma + 1]
     else:
-        # Fallback: cortar en la última palabra completa
         last_space = truncated.rfind(" ")
         if last_space > 0:
             truncated = truncated[:last_space].rstrip()
