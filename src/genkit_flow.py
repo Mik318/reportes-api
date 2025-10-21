@@ -181,16 +181,12 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
     # estimación tokens (aprox 4 chars por token)
     max_output_tokens = max(512, int(max_target / 4))
 
+    # Prompt más conciso y directo para acelerar la respuesta
     prompt = (
-        f"Genera un único JSON válido con el campo \"report\" en español, primera persona, "
-        f"pasado. El campo report debe contener un texto formal y conciso basado en las siguientes actividades:\n"
+        f"Redacta un reporte profesional en primera persona y tiempo pasado basado en estas actividades:\n"
         f"{prompt_lines}\n\n"
-        f"Objetivo de longitud: entre {min_chars} y {max_target} caracteres (prioriza llegar al mínimo y, si es posible, superar {MAX_CHARS}).\n"
-        r"Restricciones:\n"
-        r"- Responde solo con el JSON: {\"report\":\"...\"} sin nada más.\n"
-        r"- Oraciones cortas y directas; evita ejemplos, explicaciones y metadatos.\n"
-        r"- Si debes truncar, corta en el último punto o espacio antes del límite.\n"
-        r"- UTF-8, sin markdown ni etiquetas."
+        f"Longitud: {min_chars}-{max_target} caracteres.\n"
+        f'Responde únicamente: {{"report":"tu_texto_aquí"}}'
     )
 
     # No usar streaming (evitar Channel/callbacks). Llamar siempre a ai.generate() con retries
