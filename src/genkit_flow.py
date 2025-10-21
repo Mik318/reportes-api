@@ -4,7 +4,8 @@ import json
 import re
 import asyncio
 import time
-from typing import List, Optional
+from typing import List
+import unicodedata
 
 from dotenv import load_dotenv
 from genkit.ai import Genkit
@@ -21,10 +22,11 @@ logger = logging.getLogger(__name__)
 
 # Inicializa Genkit pasando explícitamente la API Key (si existe)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "googleai/gemini-2.5-flash")
 if GEMINI_API_KEY:
     ai = Genkit(
         plugins=[GoogleAI(api_key=GEMINI_API_KEY)],
-        model='googleai/gemini-2.5-flash'
+        model=GEMINI_MODEL
     )
 else:
     ai = None
@@ -39,27 +41,29 @@ def extract_report_text(noisy: str) -> str:
     if not noisy:
         return noisy
 
-    print(f"DEBUG extract_report_text - Input: {noisy[:200]}...")  # Mostrar primeros 200 chars
+    logger.debug("extract_report_text - Input: %s...", noisy[:200])  # Mostrar primeros 200 chars
 
     # 1) Buscar el patrón text='...' o text="..." de forma más robusta
     # Usar una estrategia que busque hasta la coma siguiente después del JSON
-    m = re.search(r"text=(?:'|\")(\{.*?\})(?:'|\")", noisy, re.DOTALL)
+    # Capturar cualquier cadena entre comillas después de text= de forma segura
+    m = re.search(r"text=(['\"])(.*?)\1", noisy, re.DOTALL)
     if not m:
-        # Fallback: buscar cualquier contenido después de text= hasta una coma
-        m = re.search(r"text=(?:'|\")([^'\"]*?)(?:'|\")", noisy, re.DOTALL)
+        # Fallback: buscar contenido hasta la siguiente comilla si el primero falla
+        m = re.search(r"text=(['\"])([^'\"]*?)\1", noisy, re.DOTALL)
         if not m:
-            print("DEBUG: No se encontró patrón text='...'")
+            logger.debug("No se encontró patrón text='...'")
             return noisy  # Si no encuentra el patrón, devolver tal como está
 
-    inner = m.group(1)
-    print(f"DEBUG: Contenido extraído del text=: {inner[:100]}...")
+    # El contenido entre las comillas está en el grupo 2
+    inner = m.group(2)
+    logger.debug("Contenido extraído del text=: %s...", inner[:100])
 
     # 2) Des-escapar secuencias JSON (\"report\":\"...\")
     try:
         unescaped = inner.encode('utf-8').decode('unicode_escape')
-        print(f"DEBUG: Después de des-escape: {unescaped[:100]}...")
+        logger.debug("Después de des-escape: %s...", unescaped[:100])
     except Exception as e:
-        print(f"DEBUG: Error en des-escape: {e}")
+        logger.debug("Error en des-escape: %s", e)
         unescaped = inner
 
     # 3) Intentar parsear como JSON y extraer 'report'
@@ -75,19 +79,19 @@ def extract_report_text(noisy: str) -> str:
                     # Convertir a bytes con latin-1 y luego decodificar como UTF-8
                     corrected = result.encode('latin-1').decode('utf-8')
                     result = corrected
-                    print(f"DEBUG: Corregido encoding UTF-8: {result[:50]}...")
+                    logger.debug("Corregido encoding UTF-8: %s...", result[:50])
             except Exception as encoding_error:
-                print(f"DEBUG: No se pudo corregir encoding: {encoding_error}")
+                logger.debug("No se pudo corregir encoding: %s", encoding_error)
 
-            print(f"DEBUG: JSON parseado exitosamente, report: {result[:50]}...")
+            logger.debug("JSON parseado exitosamente, report: %s...", result[:50])
             return result
         else:
-            print(f"DEBUG: JSON parseado pero sin 'report' field o no es dict: {type(parsed)}")
+            logger.debug("JSON parseado pero sin 'report' field o no es dict: %s", type(parsed))
     except Exception as e:
-        print(f"DEBUG: Error parseando JSON: {e}")
+        logger.debug("Error parseando JSON: %s", e)
 
     # 4) Fallback: extraer con regex "report":"..." usando una captura más permisiva
-    m2 = re.search(r'"report"\s*:\s*"([^"]*)"', unescaped)
+    m2 = re.search(r'"report"\s*:\s*"([^"]*?)"', unescaped)
     if m2:
         try:
             result = m2.group(1).encode('utf-8').decode('unicode_escape').strip()
@@ -96,14 +100,14 @@ def extract_report_text(noisy: str) -> str:
             try:
                 if 'Ã' in result:
                     result = result.encode('latin-1').decode('utf-8')
-                    print(f"DEBUG: Regex fallback - corregido encoding: {result[:50]}...")
+                    logger.debug("Regex fallback - corregido encoding: %s...", result[:50])
             except Exception:
                 pass
 
-            print(f"DEBUG: Regex fallback exitoso: {result[:50]}...")
+            logger.debug("Regex fallback exitoso: %s...", result[:50])
             return result
         except Exception as e:
-            print(f"DEBUG: Error en regex fallback des-escape: {e}")
+            logger.debug("Error en regex fallback des-escape: %s", e)
             result = m2.group(1).strip()
 
             # Intentar corregir encoding también en este caso
@@ -113,13 +117,13 @@ def extract_report_text(noisy: str) -> str:
             except Exception:
                 pass
 
-            print(f"DEBUG: Regex fallback sin des-escape: {result[:50]}...")
+            logger.debug("Regex fallback sin des-escape: %s...", result[:50])
             return result
     else:
-        print("DEBUG: No se encontró patrón 'report' con regex")
+        logger.debug("No se encontró patrón 'report' con regex")
 
     # 5) Si no se puede extraer, devolver el contenido del text=
-    print(f"DEBUG: Devolviendo contenido crudo del text=: {inner[:50]}...")
+    logger.debug("Devolviendo contenido crudo del text=: %s...", inner[:50])
     return inner.strip()
 
 
@@ -159,8 +163,8 @@ async def _local_generate_report(actividades: List[str]) -> str:
 
 @ai.flow() if ai is not None else None
 async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
-    # Timeout configurable para llamadas a la IA (segundos)
-    timeout = int(os.getenv("GENAI_TIMEOUT", "8"))
+    # Timeout configurable para llamadas a la IA (segundos) — aumentado a 20s por defecto
+    timeout = int(os.getenv("GENAI_TIMEOUT", "20"))
 
     # Si no hay API key, usar generador local (igual que antes)
     if ai is None:
@@ -170,91 +174,174 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
         return ReportResponse(report=report)
 
     prompt_lines = "\n".join(f"- {a}" for a in input_data.actividades)
-    # Solicitar \"máximo\" en lugar de \"exactamente\" para evitar trabajo extra del modelo
+
+    # rango objetivo: cercano o superior a MAX_CHARS
+    min_chars = max(int(MAX_CHARS * 0.9), MAX_CHARS - 50)
+    max_target = MAX_CHARS + 300  # permitir algo por encima
+    # estimación tokens (aprox 4 chars por token)
+    max_output_tokens = max(512, int(max_target / 4))
+
     prompt = (
-            f"Genera un reporte formal y conciso basado en las siguientes actividades:\n"
-            f"{prompt_lines}\n\n"
-            f"Restricciones:\n"
-            f"- Máximo {MAX_CHARS} caracteres. Prioriza frases completas; si truncas, corta en el último punto o espacio antes del límite.\n"
-            + "- Responde únicamente con un JSON válido con un único campo \"report\" (ej. `{\"report\":\"...\"}`). No añadas nada más.\n"
-            + "- Español, primera persona, pasado, sin numeración ni metadatos.\n"
-            + "- Oraciones cortas y concisas. Evita ejemplos, explicaciones y prefacios.\n"
-            + "- Si no puedes respetar el límite, devuelve la versión truncada más cercana sin pedir reintentos.\n"
-            + "- UTF-8, sin markdown ni etiquetas. No uses caracteres adicionales fuera del JSON.\n"
+        f"Genera un único JSON válido con el campo \"report\" en español, primera persona, "
+        f"pasado. El campo report debe contener un texto formal y conciso basado en las siguientes actividades:\n"
+        f"{prompt_lines}\n\n"
+        f"Objetivo de longitud: entre {min_chars} y {max_target} caracteres (prioriza llegar al mínimo y, si es posible, superar {MAX_CHARS}).\n"
+        r"Restricciones:\n"
+        r"- Responde solo con el JSON: {\"report\":\"...\"} sin nada más.\n"
+        r"- Oraciones cortas y directas; evita ejemplos, explicaciones y metadatos.\n"
+        r"- Si debes truncar, corta en el último punto o espacio antes del límite.\n"
+        r"- UTF-8, sin markdown ni etiquetas."
     )
 
-    report: str | None = None
-    start = time.perf_counter()
-
-    # Intento principal: usar output_schema pero con timeout
-    try:
+    # No usar streaming (evitar Channel/callbacks). Llamar siempre a ai.generate() con retries
+    raw_text = None
+    start_call = None
+    def _normalize_text(s: str) -> str:
+        if not isinstance(s, str):
+            try:
+                s = str(s)
+            except Exception:
+                s = ''
         try:
-            result = await asyncio.wait_for(ai.generate(prompt=prompt, output_schema=ReportResponse), timeout=timeout)
-        except asyncio.TimeoutError:
-            logger.warning("AI generate con output_schema excedió timeout de %s s, intentando fallback", timeout)
-            raise
-    except Exception as e:
-        # Si falla (incluyendo timeout), intentar fallback rápido sin schema con timeout
-        logger.debug("Error al generar con output_schema: %s", e)
-        try:
-            raw = await asyncio.wait_for(ai.generate(prompt=prompt), timeout=timeout)
-        except asyncio.TimeoutError:
-            elapsed = time.perf_counter() - start
-            logger.error("Timeout generando reporte (fallback) después de %.2fs", elapsed)
-            raise ValueError("Timeout generando el reporte") from None
-        except Exception as e2:
-            logger.error("Error al llamar al proveedor AI (fallback): %s", e2)
-            raise ValueError("Error al generar el reporte") from e2
-
-        # Extraer texto del objeto raw de forma defensiva
-        if hasattr(raw, 'response') and isinstance(raw.response, str):
-            report = raw.response.strip()
-        elif hasattr(raw, 'text') and isinstance(raw.text, str):
-            report = raw.text.strip()
-        else:
-            report = str(raw).strip()
-    else:
-        # Si no hubo excepción, intentar extraer del resultado parseado
-        if getattr(result, 'output', None) and getattr(result.output, 'report', None):
-            report = result.output.report.strip()
-        else:
-            if getattr(result, 'response', None) and isinstance(result.response, str):
-                report = result.response.strip()
-            else:
-                report = str(result).strip()
-
-    elapsed_total = time.perf_counter() - start
-    logger.debug("Tiempo total generar_reporte: %.2fs", elapsed_total)
-
-    if not report:
-        try:
-            logger.error("Generación AI falló, result raw: %s", str(result if 'result' in locals() else raw if 'raw' in locals() else None))
+            s = unicodedata.normalize('NFC', s)
         except Exception:
-            logger.exception("Error al imprimir resultado para depuración")
-        raise ValueError("Error al generar el reporte")
+            pass
+        if 'Ã' in s or 'Â' in s:
+            try:
+                s = s.encode('latin-1').decode('utf-8')
+            except Exception:
+                pass
+        return s
 
-    # Extraer solo el texto importante del campo 'report'
-    report = extract_report_text(report)
+    def fix_mojibake_and_normalize(s: str) -> str:
+        """Intentar corregir mojibake común (latin-1 interpretado como utf-8) y normalizar Unicode.
 
-    # Truncado más inteligente como antes
-    if len(report) <= MAX_CHARS:
+        - Si detecta secuencias típicas de mojibake ('Ã', 'Â'), intenta re-decodificar desde latin-1.
+        - Siempre aplica unicodedata.normalize('NFC').
+        """
+        if not isinstance(s, str):
+            try:
+                s = str(s or '')
+            except Exception:
+                s = ''
+        # Primer intento: normalizar
+        try:
+            s = unicodedata.normalize('NFC', s)
+        except Exception:
+            pass
+
+        # Si hay indicios de mojibake, intentar re-decode
+        if 'Ã' in s or 'Â' in s:
+            try:
+                s2 = s.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+                # normalizar resultado
+                try:
+                    s2 = unicodedata.normalize('NFC', s2)
+                except Exception:
+                    pass
+                s = s2
+            except Exception:
+                # si falla, mantener original
+                pass
+
+        return s
+
+    try:
+        start_call = time.perf_counter()
+        try:
+            raw = await asyncio.wait_for(ai.generate(prompt=prompt, model=GEMINI_MODEL), timeout=timeout)
+        except TypeError:
+            raw = await asyncio.wait_for(ai.generate(prompt=prompt), timeout=timeout)
+        elapsed_call = time.perf_counter() - start_call
+        logger.debug("AI generate llamada completada en %.2fs (timeout=%ss)", elapsed_call, timeout)
+    except asyncio.TimeoutError:
+        logger.warning("Primera llamada a AI timeout tras %ss, intentando reintento con timeout doble", timeout)
+        try:
+            retry_timeout = timeout * 2
+            start_call = time.perf_counter()
+            try:
+                raw = await asyncio.wait_for(ai.generate(prompt=prompt, model=GEMINI_MODEL), timeout=retry_timeout)
+            except TypeError:
+                raw = await asyncio.wait_for(ai.generate(prompt=prompt), timeout=retry_timeout)
+            elapsed_call = time.perf_counter() - start_call
+            logger.debug("Reintento AI completado en %.2fs (timeout=%ss)", elapsed_call, retry_timeout)
+        except Exception as retry_exc:
+            logger.error("Reintento a la IA falló: %s. Usando generador local de fallback.", retry_exc)
+            report = await _local_generate_report(input_data.actividades)
+            if not report:
+                raise ValueError("Error al generar el reporte (fallback local falló)")
+            return ReportResponse(report=report)
+    except Exception as e:
+        logger.warning("Llamada a IA falló: %s. Intentando fallback local.", e)
+        report = await _local_generate_report(input_data.actividades)
+        if not report:
+            raise ValueError("Error al generar el reporte (fallback local falló)")
         return ReportResponse(report=report)
 
-    truncated = report[:MAX_CHARS]
-    last_period = truncated.rfind('.')
-    last_semicolon = truncated.rfind(';')
-    last_comma = truncated.rfind(',')
-    min_acceptable_length = int(MAX_CHARS * 0.9)
-
-    if last_period > min_acceptable_length:
-        truncated = truncated[:last_period + 1]
-    elif last_semicolon > min_acceptable_length:
-        truncated = truncated[:last_semicolon + 1]
-    elif last_comma > min_acceptable_length:
-        truncated = truncated[:last_comma + 1]
+    # Extraer texto del objeto raw
+    if hasattr(raw, 'response') and isinstance(raw.response, str):
+        raw_text = _normalize_text(raw.response)
+    elif hasattr(raw, 'text') and isinstance(raw.text, str):
+        raw_text = _normalize_text(raw.text)
     else:
-        last_space = truncated.rfind(" ")
-        if last_space > 0:
-            truncated = truncated[:last_space].rstrip()
+        raw_text = _normalize_text(str(raw))
 
+    # Captura el contenido de la cadena JSON del campo "report", manejando escapes correctamente
+    m = re.search(r'"report"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', raw_text, re.DOTALL)
+    report_text = None
+    if m:
+        candidate = m.group(1)
+        try:
+            # des-escape JSON string
+            candidate_unescaped = candidate.encode('utf-8').decode('unicode_escape')
+            parsed = {"report": candidate_unescaped}
+            report_text = parsed["report"].strip()
+        except Exception:
+            report_text = candidate.strip()
+    else:
+        # fallback: intentar parsear cualquier JSON completo en el texto
+        try:
+            j = json.loads(raw_text)
+            if isinstance(j, dict) and "report" in j:
+                report_text = str(j["report"]).strip()
+        except Exception:
+            report_text = raw_text.strip()
+
+    if not report_text:
+        logger.error("No se pudo extraer report del resultado AI")
+        raise ValueError("Error al generar el reporte")
+
+    # Aplicar corrección de mojibake / normalización de acentos antes de devolver
+    try:
+        report_text = fix_mojibake_and_normalize(report_text)
+    except Exception:
+        logger.debug("No se pudo aplicar fix_mojibake_and_normalize; devolviendo texto sin cambios")
+
+    # Calcular tiempo total solo si start_call fue inicializado
+    if start_call is not None:
+        try:
+            total_elapsed = time.perf_counter() - start_call
+            logger.debug("Tiempo total generación (desde llamada AI): %.2fs", total_elapsed)
+        except Exception:
+            pass
+
+    # Si es más corto que el mínimo objetivo, advertir pero devolver (evitar reintentos costosos)
+    if len(report_text) < min_chars:
+        logger.warning("Reporte generado corto (%d chars) menor que mínimo %d", len(report_text), min_chars)
+
+    # truncado limpio como antes
+    if len(report_text) <= MAX_CHARS:
+        return ReportResponse(report=report_text)
+    truncated = report_text[:MAX_CHARS]
+    last_period = truncated.rfind('.')
+    last_space = truncated.rfind(' ')
+    if last_period > int(MAX_CHARS * 0.9):
+        truncated = truncated[:last_period + 1]
+    elif last_space > 0:
+        truncated = truncated[:last_space].rstrip()
+    # también normalizar/tratar truncado final
+    try:
+        truncated = fix_mojibake_and_normalize(truncated)
+    except Exception:
+        pass
     return ReportResponse(report=truncated)
