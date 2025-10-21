@@ -172,11 +172,15 @@ async def generar_reporte(input_data: ReportRequest) -> ReportResponse:
     prompt_lines = "\n".join(f"- {a}" for a in input_data.actividades)
     # Solicitar \"máximo\" en lugar de \"exactamente\" para evitar trabajo extra del modelo
     prompt = (
-        f"Genera un reporte formal y conciso basado en las siguientes actividades:\n"
-        f"{prompt_lines}\n\n"
-        f"El reporte debe tener como máximo {MAX_CHARS} caracteres. "
-        f"Devuélvelo como texto plano en un campo llamado 'report', "
-        f"en primera persona y en pasado, sin numeración ni metadatos adicionales."
+            f"Genera un reporte formal y conciso basado en las siguientes actividades:\n"
+            f"{prompt_lines}\n\n"
+            f"Restricciones:\n"
+            f"- Máximo {MAX_CHARS} caracteres. Prioriza frases completas; si truncas, corta en el último punto o espacio antes del límite.\n"
+            + "- Responde únicamente con un JSON válido con un único campo \"report\" (ej. `{\"report\":\"...\"}`). No añadas nada más.\n"
+            + "- Español, primera persona, pasado, sin numeración ni metadatos.\n"
+            + "- Oraciones cortas y concisas. Evita ejemplos, explicaciones y prefacios.\n"
+            + "- Si no puedes respetar el límite, devuelve la versión truncada más cercana sin pedir reintentos.\n"
+            + "- UTF-8, sin markdown ni etiquetas. No uses caracteres adicionales fuera del JSON.\n"
     )
 
     report: str | None = None
