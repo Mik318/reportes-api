@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class Token(BaseModel):
@@ -39,6 +39,13 @@ class ReportResponse(BaseModel):
 class AuthTokenResponse(BaseModel):
     """
     Respuesta con el token de autenticación.
+    Ahora incluye opcionalmente el refresh_token proporcionado por Supabase.
     """
     access_token: str = Field(..., description="Token JWT de acceso")
     token_type: str = Field("bearer", description="Tipo de token de autenticación")
+    refresh_token: Optional[str] = Field(None, description="Refresh token (opcional)")
+
+
+class RefreshRequest(BaseModel):
+    """Petición para refrescar tokens a partir de refresh_token"""
+    refresh_token: str = Field(..., description="Refresh token proporcionado por Supabase")

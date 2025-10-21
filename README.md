@@ -77,13 +77,20 @@ Sigue estos pasos para configurar y ejecutar el proyecto en tu entorno local.
 
 La API utiliza autenticación basada en **Tokens JWT (Bearer Token)**. Para acceder a los endpoints protegidos, primero debes obtener un token.
 
-1.  **Crear una cuenta:** (Si es necesario)
-    ```bash
-    POST /auth/create-account?email=user@example.com&password=securepassword123
+1.  **Crear una cuenta (seguro):**
+    Envía un POST con el email y la contraseña en el body JSON. No uses query string para enviar credenciales.
+    ```http
+    POST /auth/create-account
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "password": "securepassword123"
+    }
     ```
 
 2.  **Obtener un token:**
-    Envía tus credenciales al endpoint `/auth/get-token` para recibir un `access_token`.
+    Envía tus credenciales al endpoint `/auth/get-token` (POST JSON) para recibir un `access_token`.
     ```http
     POST /auth/get-token
     Content-Type: application/json
@@ -110,7 +117,7 @@ A continuación se describen los endpoints disponibles.
 
 -   `POST /auth/create-account`
     -   **Descripción:** Crea un nuevo usuario en el sistema.
-    -   **Parámetros (Query):** `email`, `password`.
+    -   **Cuerpo (Body):** JSON con `email` y `password`.
 
 -   `POST /auth/get-token`
     -   **Descripción:** Autentica a un usuario y devuelve un token JWT.
